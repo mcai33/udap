@@ -1,7 +1,7 @@
 {
   "name": "udap",
   "private": true,
-  "version": "0.1.0",
+  "version": "26.34.2",
   "type": "module",
   "scripts": {
     "dev": "vite",

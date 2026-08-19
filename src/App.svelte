@@ -30,7 +30,6 @@
   let status = "准备就绪";
   let errorMessage = "";
   let progress = 0;
-  const appVersion = "2026.34.1";
 
   function formatError(error: unknown): string {
     if (typeof error === "string") return error;
@@ -160,17 +159,15 @@
   loadTargets();
 </script>
 
-<svelte:head><title>uDAP Programmer {appVersion}</title></svelte:head>
-
-<nav class="topbar">
-  <div class="brand">uDAP Programmer <span>{appVersion}</span></div>
-  <div class="online"><span></span> 在线模式</div>
-</nav>
+<svelte:head><title>uDAP Programmer</title></svelte:head>
 
 <main>
   <header class="hero">
-    <p>Powered by Synairy</p>
-    <h1>通用ICP烧录器</h1>
+    <div>
+      <p class="eyebrow">Powered by Synairy</p>
+      <h1>通用ICP烧录器</h1>
+    </div>
+    <div class="online"><span></span> 在线模式</div>
   </header>
 
   <section class="workspace">
