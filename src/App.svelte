@@ -30,6 +30,7 @@
   let status = "准备就绪";
   let errorMessage = "";
   let progress = 0;
+  const appVersion = "2026.34.1";
 
   function formatError(error: unknown): string {
     if (typeof error === "string") return error;
@@ -159,16 +160,17 @@
   loadTargets();
 </script>
 
-<svelte:head><title>uDAP Programmer</title></svelte:head>
+<svelte:head><title>uDAP Programmer {appVersion}</title></svelte:head>
+
+<nav class="topbar">
+  <div class="brand">uDAP Programmer <span>{appVersion}</span></div>
+  <div class="online"><span></span> 在线模式</div>
+</nav>
 
 <main>
   <header class="hero">
-    <div>
-      <p class="eyebrow">UNIVERSAL DAP PROGRAMMER</p>
-      <h1>连接。识别。烧录。</h1>
-      <p class="subtitle">通过 CMSIS-DAP 为 ARM 与 RISC-V 目标提供可靠的在线烧录。</p>
-    </div>
-    <div class="online"><span></span> 在线模式</div>
+    <p>Powered by Synairy</p>
+    <h1>通用ICP烧录器</h1>
   </header>
 
   <section class="workspace">
