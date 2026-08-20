@@ -1,0 +1,15 @@
+[package]
+name = "udap-cli"
+version = "26.34.3"
+description = "Portable command-line CMSIS-DAP programmer"
+authors = ["uDAP contributors"]
+edition = "2024"
+
+[dependencies]
+probe-rs = "=0.32.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -33,3 +33,18 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+
+  cli:
+    name: CLI checks
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: udap-cli
+      - run: cargo fmt --manifest-path udap-cli/Cargo.toml -- --check
+      - run: cargo clippy --manifest-path udap-cli/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --manifest-path udap-cli/Cargo.toml

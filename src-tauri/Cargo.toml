@@ -1,6 +1,6 @@
 [package]
 name = "udap"
-version = "26.34.2"
+version = "26.34.3"
 description = "A cross-platform CMSIS-DAP programmer"
 authors = ["uDAP contributors"]
 edition = "2024"

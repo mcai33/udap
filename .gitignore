@@ -1,6 +1,6 @@
 node_modules/
 dist/
 src-tauri/target/
+udap-cli/target/
 .DS_Store
 *.log
-
