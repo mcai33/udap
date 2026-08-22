@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "udap-cli"
-version = "26.34.3"
+version = "26.34.4"
 dependencies = [
  "probe-rs",
 ]

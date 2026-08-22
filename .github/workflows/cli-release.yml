@@ -1,0 +1,63 @@
+name: CLI Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["cli-v*"]
+
+jobs:
+  win7-cli:
+    name: Win7 x64 portable CLI
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-08-01
+          components: rust-src
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: udap-cli
+          key: win7-x64
+      - name: Read CLI version
+        id: version
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --manifest-path udap-cli/Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+          $version = $metadata.packages[0].version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=cli-v$version" >> $env:GITHUB_OUTPUT
+      - name: Build Windows 7 compatible CLI
+        shell: pwsh
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo +nightly-2026-08-01 build --manifest-path udap-cli/Cargo.toml --release --target x86_64-win7-windows-msvc -Z build-std=std,panic_abort
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP "udap-cli-win7-x64"
+          $release = Join-Path $PWD "release"
+          New-Item -ItemType Directory -Force -Path $stage, $release | Out-Null
+          Copy-Item "udap-cli/target/x86_64-win7-windows-msvc/release/udap-cli.exe" $stage
+          Copy-Item "udap-cli/README.txt" $stage
+          $archive = Join-Path $release "uDAP-Programmer-CLI_${{ steps.version.outputs.version }}_win7-x64-portable.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $archive -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: udap-cli-win7-x64
+          path: release/*.zip
+          if-no-files-found: error
+      - name: Create CLI draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG --draft --target $env:GITHUB_SHA --title "uDAP Programmer CLI v$env:RELEASE_VERSION" --notes "Portable Windows 7 x64 command-line programmer." --repo $env:GITHUB_REPOSITORY
+          }
+          gh release upload $env:RELEASE_TAG release/*.zip --clobber --repo $env:GITHUB_REPOSITORY

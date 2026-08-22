@@ -17,6 +17,22 @@ use probe_rs::{
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const SUPPORTED_TARGETS: [TargetChoice; 2] = [
+    TargetChoice {
+        display_name: "PY32F002B",
+        probe_rs_name: "PY32F002Bx5",
+    },
+    TargetChoice {
+        display_name: "PY32F071",
+        probe_rs_name: "PY32F071xB",
+    },
+];
+
+#[derive(Clone, Copy)]
+struct TargetChoice {
+    display_name: &'static str,
+    probe_rs_name: &'static str,
+}
 
 #[derive(Clone)]
 struct ConnectionOptions {
@@ -37,10 +53,11 @@ impl Default for ConnectionOptions {
     }
 }
 
+#[derive(Clone)]
 struct FlashOptions {
     connection: ConnectionOptions,
     firmware: String,
-    target: Option<String>,
+    target: String,
     base_address: Option<u64>,
     verify: bool,
     chip_erase: bool,
@@ -71,13 +88,6 @@ fn run() -> Result<(), String> {
         }
         "probes" => list_probes(),
         "targets" => list_targets(args.get(1).map(String::as_str)),
-        "detect" => {
-            let options = parse_connection_options(&args[1..])?;
-            let (target, speed) = detect_target(&options)?;
-            println!("目标芯片：{target}");
-            println!("实际时钟：{speed} kHz");
-            Ok(())
-        }
         "flash" => {
             let options = parse_flash_options(&args[1..])?;
             flash(options)
@@ -90,10 +100,9 @@ fn print_help() {
     println!(
         "uDAP Programmer CLI {VERSION}\n\
          \n用法：\n\
-         \x20 udap-cli.exe                     进入交互模式\n\
+         \x20 udap-cli.exe                     进入连续烧录模式\n\
          \x20 udap-cli.exe probes              列出调试器\n\
-         \x20 udap-cli.exe detect [选项]       自动识别目标\n\
-         \x20 udap-cli.exe targets [关键字]    搜索支持的目标\n\
+         \x20 udap-cli.exe targets             列出可选目标\n\
          \x20 udap-cli.exe flash <文件> [选项] 烧录固件\n\
          \n连接选项：\n\
          \x20 --probe <序号>                   调试器序号，默认 1\n\
@@ -101,7 +110,7 @@ fn print_help() {
          \x20 --speed <kHz>                     调试时钟，默认 4000\n\
          \x20 --connect-under-reset             复位下连接\n\
          \n烧录选项：\n\
-         \x20 --target <型号>                   手动指定目标芯片\n\
+         \x20 --target <型号>                   PY32F002B 或 PY32F071（必填）\n\
          \x20 --base-address <地址>             BIN 烧录地址，例如 0x08000000\n\
          \x20 --chip-erase                      执行全片擦除\n\
          \x20 --no-verify                       不校验\n\
@@ -136,17 +145,11 @@ fn interactive() -> Result<(), String> {
         connect_under_reset,
     };
 
-    println!("\n正在自动识别目标……");
-    let target = match detect_target(&connection) {
-        Ok((target, actual_speed)) => {
-            println!("识别成功：{target}（{actual_speed} kHz）");
-            target
-        }
-        Err(error) => {
-            println!("自动识别失败：{error}");
-            choose_target_interactively()?
-        }
-    };
+    println!("\n可选目标：");
+    for (index, target) in SUPPORTED_TARGETS.iter().enumerate() {
+        println!("  {}. {}", index + 1, target.display_name);
+    }
+    let target = SUPPORTED_TARGETS[prompt_usize("请选择目标", 1, SUPPORTED_TARGETS.len())? - 1];
 
     let firmware = strip_path_quotes(&prompt_required("请输入固件路径")?);
     if !Path::new(&firmware).is_file() {
@@ -165,22 +168,40 @@ fn interactive() -> Result<(), String> {
     let reset_after = prompt_yes_no("烧录后复位运行", true)?;
 
     println!("\n即将烧录：");
-    println!("  目标：{target}");
+    println!("  目标：{}", target.display_name);
     println!("  文件：{firmware}");
-    if !prompt_yes_no("确认开始", true)? {
-        println!("已取消。 ");
-        return Ok(());
-    }
+    println!("配置完成，后续烧录将重复使用以上配置。 ");
 
-    flash(FlashOptions {
+    let options = FlashOptions {
         connection,
         firmware,
-        target: Some(target),
+        target: target.probe_rs_name.to_string(),
         base_address,
         verify,
         chip_erase,
         reset_after,
-    })
+    };
+    let mut attempt = 1_u64;
+    loop {
+        let action = prompt("按 Enter 开始烧录；输入 q 退出")?;
+        if action.eq_ignore_ascii_case("q") {
+            println!("已退出连续烧录模式。 ");
+            return Ok(());
+        }
+        if !action.is_empty() {
+            println!("请输入 Enter 或 q。 ");
+            continue;
+        }
+
+        println!("\n========== 第 {attempt} 次烧录 ==========");
+        match flash(options.clone()) {
+            Ok(()) => println!("请更换目标板，按 Enter 可继续使用相同配置。\n"),
+            Err(error) => {
+                eprintln!("烧录失败：{error}\n请检查连接后按 Enter 重试，或输入 q 退出。\n")
+            }
+        }
+        attempt += 1;
+    }
 }
 
 fn list_probes() -> Result<(), String> {
@@ -217,70 +238,20 @@ fn print_probe_list(probes: &[DebugProbeInfo]) {
 }
 
 fn list_targets(query: Option<&str>) -> Result<(), String> {
-    let targets = matching_targets(query.unwrap_or(""));
+    let query = query.unwrap_or("").trim().to_ascii_lowercase();
+    let targets = SUPPORTED_TARGETS
+        .iter()
+        .filter(|target| {
+            query.is_empty() || target.display_name.to_ascii_lowercase().contains(&query)
+        })
+        .collect::<Vec<_>>();
     if targets.is_empty() {
         return Err("没有找到匹配的目标芯片".into());
     }
-    for target in &targets {
-        println!("{target}");
+    for target in targets {
+        println!("{}", target.display_name);
     }
-    println!("\n共 {} 个目标", targets.len());
     Ok(())
-}
-
-fn matching_targets(query: &str) -> Vec<String> {
-    let query = query.trim().to_ascii_lowercase();
-    let registry = Registry::from_builtin_families();
-    let mut targets = registry
-        .families()
-        .iter()
-        .flat_map(|family| family.variants.iter().map(|chip| chip.name.clone()))
-        .filter(|name| query.is_empty() || name.to_ascii_lowercase().contains(&query))
-        .collect::<Vec<_>>();
-    targets.sort_by_key(|name| name.to_ascii_lowercase());
-    targets.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-    targets
-}
-
-fn choose_target_interactively() -> Result<String, String> {
-    loop {
-        let query = prompt_required("请输入目标型号关键字")?;
-        let targets = matching_targets(&query);
-        if targets.is_empty() {
-            println!("没有匹配结果，请换一个关键字。 ");
-            continue;
-        }
-        let shown = targets.len().min(50);
-        println!(
-            "匹配结果{}：",
-            if targets.len() > shown {
-                "（仅显示前 50 个）"
-            } else {
-                ""
-            }
-        );
-        for (index, target) in targets.iter().take(shown).enumerate() {
-            println!("  {}. {target}", index + 1);
-        }
-        let selection = prompt_usize("请选择目标", 1, shown)?;
-        return Ok(targets[selection - 1].clone());
-    }
-}
-
-fn detect_target(options: &ConnectionOptions) -> Result<(String, u32), String> {
-    let (probe, actual_speed) = open_probe(options)?;
-    let registry = Registry::from_builtin_families();
-    let session = if options.connect_under_reset {
-        probe.attach_under_reset_with_registry(
-            TargetSelector::Auto,
-            Permissions::default(),
-            &registry,
-        )
-    } else {
-        probe.attach_with_registry(TargetSelector::Auto, Permissions::default(), &registry)
-    }
-    .map_err(|error| format!("无法自动识别目标芯片：{error}"))?;
-    Ok((session.target().name.clone(), actual_speed))
 }
 
 fn open_probe(options: &ConnectionOptions) -> Result<(probe_rs::probe::Probe, u32), String> {
@@ -308,22 +279,14 @@ fn open_probe(options: &ConnectionOptions) -> Result<(probe_rs::probe::Probe, u3
     Ok((probe, actual_speed))
 }
 
-fn flash(mut options: FlashOptions) -> Result<(), String> {
+fn flash(options: FlashOptions) -> Result<(), String> {
     if !Path::new(&options.firmware).is_file() {
         return Err(format!("固件文件不存在：{}", options.firmware));
     }
     if is_bin(&options.firmware) && options.base_address.is_none() {
         return Err("BIN 文件必须通过 --base-address 指定烧录地址".into());
     }
-    let target = match options.target.take() {
-        Some(target) => target,
-        None => {
-            println!("正在自动识别目标……");
-            let (target, speed) = detect_target(&options.connection)?;
-            println!("识别成功：{target}（{speed} kHz）");
-            target
-        }
-    };
+    let target = options.target.clone();
 
     println!("正在连接 {target}……");
     let (probe, _) = open_probe(&options.connection)?;
@@ -428,33 +391,6 @@ fn firmware_loader(path: &str, base_address: Option<u64>) -> Result<Box<dyn Imag
     }
 }
 
-fn parse_connection_options(args: &[String]) -> Result<ConnectionOptions, String> {
-    let mut options = ConnectionOptions::default();
-    let mut index = 0;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--probe" => {
-                options.probe_number = next_value(args, &mut index, "--probe")?
-                    .parse()
-                    .map_err(|_| "--probe 必须是数字".to_string())?;
-            }
-            "--protocol" => {
-                options.protocol = parse_protocol(next_value(args, &mut index, "--protocol")?)?;
-            }
-            "--speed" => {
-                options.speed_khz = next_value(args, &mut index, "--speed")?
-                    .parse::<u32>()
-                    .map_err(|_| "--speed 必须是正整数".to_string())?
-                    .max(1);
-            }
-            "--connect-under-reset" => options.connect_under_reset = true,
-            value => return Err(format!("未知选项：{value}")),
-        }
-        index += 1;
-    }
-    Ok(options)
-}
-
 fn parse_flash_options(args: &[String]) -> Result<FlashOptions, String> {
     let firmware = args
         .first()
@@ -485,7 +421,10 @@ fn parse_flash_options(args: &[String]) -> Result<FlashOptions, String> {
                     .max(1);
             }
             "--connect-under-reset" => connection.connect_under_reset = true,
-            "--target" => target = Some(next_value(args, &mut index, "--target")?.to_string()),
+            "--target" => {
+                target =
+                    Some(resolve_target(next_value(args, &mut index, "--target")?)?.to_string())
+            }
             "--base-address" => {
                 base_address = Some(parse_address(next_value(
                     args,
@@ -503,7 +442,7 @@ fn parse_flash_options(args: &[String]) -> Result<FlashOptions, String> {
     Ok(FlashOptions {
         connection,
         firmware,
-        target,
+        target: target.ok_or_else(|| "必须通过 --target 指定 PY32F002B 或 PY32F071".to_string())?,
         base_address,
         verify,
         chip_erase,
@@ -524,6 +463,14 @@ fn parse_protocol(value: &str) -> Result<WireProtocol, String> {
         "jtag" => Ok(WireProtocol::Jtag),
         _ => Err("协议仅支持 SWD 或 JTAG".into()),
     }
+}
+
+fn resolve_target(value: &str) -> Result<&'static str, String> {
+    SUPPORTED_TARGETS
+        .iter()
+        .find(|target| target.display_name.eq_ignore_ascii_case(value.trim()))
+        .map(|target| target.probe_rs_name)
+        .ok_or_else(|| "目标仅支持 PY32F002B 或 PY32F071".to_string())
 }
 
 fn parse_address(value: &str) -> Result<u64, String> {
@@ -644,10 +591,11 @@ mod tests {
     }
 
     #[test]
-    fn target_search_is_available_and_sorted() {
-        let targets = matching_targets("STM32F103");
-        assert!(!targets.is_empty());
-        assert!(targets.windows(2).all(|pair| pair[0] <= pair[1]));
+    fn only_exposes_supported_targets() {
+        assert_eq!(SUPPORTED_TARGETS.len(), 2);
+        assert_eq!(resolve_target("PY32F002B").unwrap(), "PY32F002Bx5");
+        assert_eq!(resolve_target("py32f071").unwrap(), "PY32F071xB");
+        assert!(resolve_target("STM32F103").is_err());
     }
 
     #[test]
